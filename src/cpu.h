@@ -66,6 +66,7 @@ private:
   void prgCtrToStk();
   uint8_t fetchMem();
   void writeToAccOrMem(uint16_t data);
+  uint8_t isPageChanged(uint16_t hi);
 
   // Addressing mode base functions
   uint16_t absBase(uint8_t reg);

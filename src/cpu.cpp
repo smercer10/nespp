@@ -150,8 +150,11 @@ void CPU::setFlag(eStatusFlags flag, bool b) {
 }
 
 void CPU::clock() {
-  if (remCycles_ == 0) {
+  if (!remCycles_) {
     opcode_ = read(prgCtr_);
+
+    setFlag(U, true);
+
     prgCtr_++;
 
     remCycles_ = opLookup_[opcode_].requiredCycles;
@@ -160,8 +163,9 @@ void CPU::clock() {
     uint8_t extraCycle1{(this->*opLookup_[opcode_].addrMode)()};
     uint8_t extraCycle2{(this->*opLookup_[opcode_].opcode)()};
     remCycles_ += (extraCycle1 & extraCycle1);
-  }
 
+    setFlag(U, true);
+  }
   remCycles_--;
 }
 
@@ -178,7 +182,6 @@ void CPU::reset() {
   regY_ = 0x00;
   stkPtr_ = 0xFD;
   status_ = 0x00 | U;
-
   addrRel_ = 0x0000;
   addrAbs_ = 0x0000;
   memory_ = 0x00;
@@ -217,6 +220,13 @@ void CPU::nmi(uint8_t cycles = 8, uint16_t address = 0xFFFA) {
   remCycles_ = cycles;
 }
 
+uint8_t CPU::isPageChanged(uint16_t hi) {
+  if ((addrAbs_ & 0xFF00) != (hi << 8))
+    return 1;
+  else
+    return 0;
+}
+
 // Base function for absolute addressing modes
 uint16_t CPU::absBase(uint8_t reg = 0) {
   uint16_t lo{read(prgCtr_)};
@@ -249,12 +259,7 @@ uint8_t CPU::absX() {
   uint16_t hi{absBase(regX_)};
 
   // If resulting address changes the page an extra cycle is required
-  if ((addrAbs_ & 0xFF00) != (hi << 8))
-    return 1;
-  else
-    return 0;
-
-  return 0;
+  return isPageChanged(hi);
 }
 
 // Read from (supplied 16-bit address + register Y)
@@ -262,12 +267,7 @@ uint8_t CPU::absY() {
   uint16_t hi{absBase(regY_)};
 
   // If resulting address changes the page an extra cycle is required
-  if ((addrAbs_ & 0xFF00) != (hi << 8))
-    return 1;
-  else
-    return 0;
-
-  return 0;
+  return isPageChanged(hi);
 }
 
 // Read from address pointed to by supplied 16-bit address
@@ -315,12 +315,7 @@ uint8_t CPU::indY() {
   addrAbs_ += regY_;
 
   // If resulting address changes the page an extra cycle is required
-  if ((addrAbs_ & 0xFF00) != (hi << 8))
-    return 1;
-  else
-    return 0;
-
-  return 0;
+  return isPageChanged(hi);
 }
 
 // Read from next byte
@@ -389,6 +384,7 @@ void CPU::writeToAccOrMem(uint16_t data) {
 void CPU::branchBase(bool flag) {
   if (flag) {
     remCycles_++;
+
     addrAbs_ = prgCtr_ + addrRel_;
 
     // If the branch crosses a page an extra cycle is required
@@ -404,6 +400,7 @@ void CPU::compareBase(uint8_t reg) {
   fetchMem();
 
   temp_ = (uint16_t)reg - (uint16_t)memory_;
+
   setFlag(C, reg >= memory_);
   setFlag(Z, !(temp_ & 0x00FF));
   setFlag(N, temp_ & 0x0080);
@@ -534,8 +531,10 @@ uint8_t CPU::BRK() {
   prgCtrToStk();
 
   setFlag(B, true);
+
   write(0x0100 + stkPtr_, status_);
   stkPtr_--;
+
   setFlag(B, false);
 
   prgCtr_ = (uint16_t)read(0xFFFE) | ((uint16_t)read(0xFFFF) << 8);
@@ -611,8 +610,8 @@ uint8_t CPU::DEC() {
   fetchMem();
 
   temp_ = memory_ - 1;
-
   write(addrAbs_, temp_ & 0x00FF);
+
   setFlag(Z, !(temp_ & 0x00FF));
   setFlag(N, temp_ & 0x0080);
 
@@ -622,6 +621,7 @@ uint8_t CPU::DEC() {
 // Decrement X register
 uint8_t CPU::DEX() {
   regX_--;
+
   setFlag(Z, !regX_);
   setFlag(N, regX_ & 0x80);
 
@@ -631,6 +631,7 @@ uint8_t CPU::DEX() {
 // Decrement Y register
 uint8_t CPU::DEY() {
   regY_--;
+
   setFlag(Z, !regY_);
   setFlag(N, regY_ & 0x80);
 
@@ -642,6 +643,7 @@ uint8_t CPU::EOR() {
   fetchMem();
 
   acc_ ^= memory_;
+
   setFlag(Z, !acc_);
   setFlag(N, acc_ & 0x80);
 
@@ -653,8 +655,8 @@ uint8_t CPU::INC() {
   fetchMem();
 
   temp_ = memory_ + 1;
-
   write(addrAbs_, temp_ & 0x00FF);
+
   setFlag(Z, !(temp_ & 0x00FF));
   setFlag(N, temp_ & 0x80);
 
@@ -664,6 +666,7 @@ uint8_t CPU::INC() {
 // Increment X register
 uint8_t CPU::INX() {
   regX_++;
+
   setFlag(Z, !regX_);
   setFlag(N, regX_ & 0x80);
 
@@ -673,6 +676,7 @@ uint8_t CPU::INX() {
 // Increment Y register
 uint8_t CPU::INY() {
   regY_++;
+
   setFlag(Z, !regY_);
   setFlag(N, regY_ & 0x80);
 
@@ -696,6 +700,7 @@ uint8_t CPU::JSR() {
 
   return 0;
 }
+
 // Load memory into accumulator
 uint8_t CPU::LDA() {
   loadBase(acc_);
@@ -721,8 +726,10 @@ uint8_t CPU::LDY() {
 uint8_t CPU::LSR() {
   fetchMem();
 
-  setFlag(C, memory_ & 0x001);
+  setFlag(C, memory_ & 0x0001);
+
   temp_ = (uint16_t)memory_ >> 1;
+
   setFlag(Z, !(temp_ & 0x00FF));
   setFlag(N, temp_ & 0x0080);
 
@@ -751,7 +758,8 @@ uint8_t CPU::NOP() {
 uint8_t CPU::ORA() {
   fetchMem();
 
-  acc_ &= memory_;
+  acc_ |= memory_;
+
   setFlag(Z, !acc_);
   setFlag(N, acc_ & 0x80);
 
@@ -781,6 +789,7 @@ uint8_t CPU::PHP() {
 uint8_t CPU::PLA() {
   stkPtr_++;
   acc_ = read(0x0100 + stkPtr_);
+
   setFlag(Z, !acc_);
   setFlag(N, acc_ & 0x80);
 
@@ -791,6 +800,7 @@ uint8_t CPU::PLA() {
 uint8_t CPU::PLP() {
   stkPtr_++;
   status_ = read(0x0100 + stkPtr_);
+
   setFlag(U, false);
 
   return 0;
@@ -801,6 +811,7 @@ uint8_t CPU::ROL() {
   fetchMem();
 
   temp_ = (uint16_t)(memory_ << 1) | flag(C);
+
   setFlag(C, temp_ & 0xFF00);
   setFlag(Z, !(temp_ & 0x00FF));
   setFlag(N, temp_ & 0x0080);
@@ -815,6 +826,7 @@ uint8_t CPU::ROR() {
   fetchMem();
 
   temp_ = (uint16_t)(flag(C) << 7) | (memory_ >> 1);
+
   setFlag(C, memory_ & 0x01);
   setFlag(Z, !(temp_ & 0x00FF));
   setFlag(N, temp_ & 0x0080);
@@ -911,6 +923,7 @@ uint8_t CPU::STY() {
 // Transfer accumulator to register X
 uint8_t CPU::TAX() {
   regX_ = acc_;
+
   setFlag(Z, !regX_);
   setFlag(N, regX_ & 0x80);
 
@@ -920,6 +933,7 @@ uint8_t CPU::TAX() {
 // Transfer accumulator to register Y
 uint8_t CPU::TAY() {
   regY_ = acc_;
+
   setFlag(Z, !regY_);
   setFlag(N, regY_ & 0x80);
 
@@ -929,6 +943,7 @@ uint8_t CPU::TAY() {
 // Transfer stack pointer to register X
 uint8_t CPU::TSX() {
   regX_ = stkPtr_;
+
   setFlag(Z, !regX_);
   setFlag(N, regX_ & 0x80);
 
@@ -938,6 +953,7 @@ uint8_t CPU::TSX() {
 // Transfer register X to accumulator
 uint8_t CPU::TXA() {
   acc_ = regX_;
+
   setFlag(Z, !acc_);
   setFlag(N, acc_ & 0x80);
 
@@ -954,6 +970,7 @@ uint8_t CPU::TXS() {
 // Transfer register Y to accumulator
 uint8_t CPU::TYA() {
   acc_ = regY_;
+
   setFlag(Z, !acc_);
   setFlag(N, acc_ & 0x80);
 
