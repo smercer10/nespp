@@ -4,4 +4,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 project(nespp)
 
-add_executable(nespp src/main.cpp)
+enable_testing()
+
+add_subdirectory(src)
+add_subdirectory(test)
